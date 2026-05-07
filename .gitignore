@@ -1,0 +1,13 @@
+# Terraform local files
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/terraform.tfstate
+terraform/terraform.tfstate.backup
+terraform/*.tfvars
+
+# Keep example variable files
+!terraform/*.tfvars.example
+
+# OS / editor
+.DS_Store
+.vscode/
