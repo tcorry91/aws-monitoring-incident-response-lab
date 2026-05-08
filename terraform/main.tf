@@ -59,16 +59,54 @@ resource "aws_security_group" "web_server" {
   }
 }
 
+resource "aws_iam_role" "ssm_role" {
+  name = "${var.project_name}-ssm-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  tags = {
+    Name    = "${var.project_name}-ssm-role"
+    Project = var.project_name
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "ssm_managed_instance_core" {
+  role       = aws_iam_role.ssm_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_instance_profile" "ssm_instance_profile" {
+  name = "${var.project_name}-ssm-instance-profile"
+  role = aws_iam_role.ssm_role.name
+}
+
 resource "aws_instance" "web_server" {
   ami                         = data.aws_ami.amazon_linux_2023.id
   instance_type               = "t2.micro"
   vpc_security_group_ids      = [aws_security_group.web_server.id]
   associate_public_ip_address = true
+  iam_instance_profile        = aws_iam_instance_profile.ssm_instance_profile.name
 
   user_data = <<-EOF
               #!/bin/bash
+
               dnf update -y
+
+              # Install web server and stress testing tool
               dnf install -y httpd stress-ng
+
+              # Start web server
               systemctl enable httpd
               systemctl start httpd
 
@@ -81,9 +119,18 @@ resource "aws_instance" "web_server" {
               <body>
                 <h1>AWS Monitoring & Incident Response Lab</h1>
                 <p>Web server is running.</p>
+                <p>This instance is monitored by CloudWatch.</p>
               </body>
               </html>
               HTML
+
+              # Start SSM Agent if available on the AMI
+              systemctl enable amazon-ssm-agent || true
+              systemctl start amazon-ssm-agent || true
+
+              # Simulate a high CPU incident after boot
+              sleep 120
+              nohup stress-ng --cpu 2 --timeout 1200s --metrics-brief > /var/log/stress-ng.log 2>&1 &
               EOF
 
   tags = {
@@ -111,13 +158,13 @@ resource "aws_cloudwatch_metric_alarm" "high_cpu" {
   alarm_name          = "${var.project_name}-high-cpu"
   alarm_description   = "Triggers when EC2 CPU utilisation exceeds the configured threshold."
   comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = 2
-  datapoints_to_alarm = 2
+  evaluation_periods  = 1
+  datapoints_to_alarm = 1
   metric_name         = "CPUUtilization"
   namespace           = "AWS/EC2"
-  period              = 60
+  period              = 300
   statistic           = "Average"
-  threshold           = var.cpu_alarm_threshold
+  threshold           = 50
   treat_missing_data  = "notBreaching"
 
   dimensions = {
